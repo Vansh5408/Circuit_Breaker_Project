@@ -12,25 +12,25 @@ const Schema = mongoose.Schema;
  * 5. Recovery validation - verify that fixes actually resolved issues
  */
 const FailureSchema = new Schema({
-  // Which service/breaker this failure belongs to
+  
   serviceName: { 
     type: String, 
     default: 'default',
-    index: true  // Index for filtering by service
+    index: true  
   },
   
-  // Error details
+
   message: { type: String, required: true },
-  errorCode: { type: String, default: null },        // HTTP status or error code
-  errorType: { type: String, default: 'UNKNOWN' },   // TIMEOUT, CONNECTION, HTTP_ERROR, etc.
+  errorCode: { type: String, default: null },        
+  errorType: { type: String, default: 'UNKNOWN' },   
   
   // Request context (sanitized - no sensitive data!)
-  endpoint: { type: String, default: null },         // Which endpoint failed
-  method: { type: String, default: null },           // HTTP method
+  endpoint: { type: String, default: null },         
+  method: { type: String, default: null },           
   
   // Timing information
   timestamp: { type: Date, default: Date.now, index: true },
-  responseTime: { type: Number, default: null },     // How long before failure (ms)
+  responseTime: { type: Number, default: null },     
   
   // Circuit state at time of failure
   circuitState: { 
@@ -40,23 +40,23 @@ const FailureSchema = new Schema({
   },
   
   // Additional metadata
-  metadata: { type: Schema.Types.Mixed, default: {} }, // Flexible field for extra context
+  metadata: { type: Schema.Types.Mixed, default: {} }, 
   
   // For TTL - auto-delete old failure records
   expiresAt: { 
     type: Date, 
-    default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-    index: { expireAfterSeconds: 0 }  // MongoDB TTL index
+    default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), 
+    index: { expireAfterSeconds: 0 }  
   }
 }, { 
-  timestamps: false,  // We use our own timestamp field
+  timestamps: false,  
   collection: 'failures'
 });
 
-// Compound indexes for common queries
-FailureSchema.index({ serviceName: 1, timestamp: -1 });  // Recent failures by service
-FailureSchema.index({ errorType: 1, timestamp: -1 });    // Failures by type
-FailureSchema.index({ serviceName: 1, errorType: 1 });   // Service + type combo
+
+FailureSchema.index({ serviceName: 1, timestamp: -1 }); 
+FailureSchema.index({ errorType: 1, timestamp: -1 });    
+FailureSchema.index({ serviceName: 1, errorType: 1 });   
 
 /**
  * Create a failure record with proper defaults
