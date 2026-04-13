@@ -16,7 +16,6 @@ const Schema = mongoose.Schema;
  * 4. Allows external tools to query/modify breaker state
  */
 const CircuitSchema = new Schema({
-  // Service identifier - allows multiple circuit breakers per app
   serviceName: { 
     type: String, 
     default: 'default',
