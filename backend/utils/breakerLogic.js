@@ -1,33 +1,9 @@
 const CircuitBreaker = require('../models/CircuitBreaker');
 const Failure = require('../models/Failure');
 
-/**
- * Circuit Breaker Logic Module
- * 
- * This module contains the core logic for the circuit breaker pattern:
- * 
- * STATES:
- * - CLOSED: Normal operation. Requests flow through. Failures are counted.
- * - OPEN: Circuit is tripped. All requests are immediately rejected (fail-fast).
- * - HALF_OPEN: Recovery testing. Limited requests are allowed to test if the
- *              downstream service has recovered.
- * 
- * WHY FAILURE RATE > RAW COUNT?
- * - Raw count: 5 failures out of 5 requests = 100% failure (critical!)
- * - Raw count: 5 failures out of 10000 requests = 0.05% failure (acceptable)
- * - Failure rate provides context and prevents false positives during low traffic
- * 
- * The circuit trips when BOTH conditions are met:
- * 1. Failure count >= threshold (prevents tripping on 1-2 random errors)
- * 2. Failure rate >= failureRateThreshold (provides statistical significance)
- */
 
-// In-memory tracking for HALF_OPEN state (per-service)
 const halfOpenState = new Map();
 
-/**
- * Get or initialize HALF_OPEN tracking state for a service
- */
 function getHalfOpenState(serviceName = 'default') {
   if (!halfOpenState.has(serviceName)) {
     halfOpenState.set(serviceName, {
@@ -39,9 +15,6 @@ function getHalfOpenState(serviceName = 'default') {
   return halfOpenState.get(serviceName);
 }
 
-/**
- * Reset HALF_OPEN tracking state for a service
- */
 function resetHalfOpenState(serviceName = 'default') {
   halfOpenState.set(serviceName, {
     requestCount: 0,
@@ -50,19 +23,11 @@ function resetHalfOpenState(serviceName = 'default') {
   });
 }
 
-/**
- * Get the circuit breaker instance for a service
- * @param {string} serviceName - Name of the service (default: 'default')
- */
 async function getBreaker(serviceName = 'default') {
   const cb = await CircuitBreaker.getInstance(serviceName);
   return cb;
 }
 
-/**
- * Check if the current measurement window has expired and reset if needed
- * This ensures we're measuring failure rate in a rolling time window
- */
 async function checkAndResetWindow(cb) {
   if (cb.isWindowExpired()) {
     console.log(`[CircuitBreaker:${cb.serviceName}] Measurement window expired, resetting counters`);
@@ -71,32 +36,18 @@ async function checkAndResetWindow(cb) {
   }
 }
 
-/**
- * Record a failure and potentially trip the circuit
- * 
- * @param {Object} options - Failure details
- * @param {string} options.serviceName - Service identifier
- * @param {string} options.message - Error message
- * @param {string} options.errorType - Type of error (TIMEOUT, CONNECTION, HTTP_ERROR)
- * @param {string} options.errorCode - HTTP status or error code
- * @param {string} options.endpoint - Which endpoint failed
- * @param {number} options.responseTime - Time until failure in ms
- */
 async function recordFailure(options = {}) {
   const serviceName = options.serviceName || 'default';
   const cb = await getBreaker(serviceName);
   
-  // Check if measurement window needs reset
   await checkAndResetWindow(cb);
   
-  // Update counters
   cb.failureCount += 1;
   cb.failedRequests += 1;
   cb.totalRequests += 1;
   cb.lastFailureTime = new Date();
   cb.version += 1;
   
-  // Log failure to history for analytics
   try {
     await Failure.logFailure({
       serviceName,
@@ -111,7 +62,6 @@ async function recordFailure(options = {}) {
     console.error(`[CircuitBreaker:${serviceName}] Failed to log failure:`, e.message);
   }
   
-  // Handle HALF_OPEN state - single failure returns to OPEN
   if (cb.state === 'HALF_OPEN') {
     const hoState = getHalfOpenState(serviceName);
     hoState.failureCount += 1;
@@ -125,7 +75,6 @@ async function recordFailure(options = {}) {
     return cb;
   }
   
-  // Check if we should trip the circuit (CLOSED -> OPEN)
   const failureRate = cb.getFailureRate();
   const shouldTrip = 
     cb.failureCount >= cb.threshold && 
@@ -144,31 +93,21 @@ async function recordFailure(options = {}) {
   return cb;
 }
 
-/**
- * Record a successful request
- * Resets failure count in CLOSED state, advances recovery in HALF_OPEN
- * 
- * @param {string} serviceName - Service identifier
- */
 async function recordSuccess(serviceName = 'default') {
   const cb = await getBreaker(serviceName);
   
-  // Check if measurement window needs reset
   await checkAndResetWindow(cb);
   
-  // Update counters
   cb.totalRequests += 1;
   cb.lastSuccessTime = new Date();
   
   if (cb.state === 'HALF_OPEN') {
-    // Track success in HALF_OPEN state
     const hoState = getHalfOpenState(serviceName);
     hoState.successCount += 1;
     cb.successCount = hoState.successCount;
     
     console.log(`[CircuitBreaker:${serviceName}] HALF_OPEN success ${hoState.successCount}/${cb.successThreshold}`);
     
-    // Check if we have enough successes to close the circuit
     if (hoState.successCount >= cb.successThreshold) {
       cb.state = 'CLOSED';
       cb.failureCount = 0;
@@ -181,37 +120,24 @@ async function recordSuccess(serviceName = 'default') {
       console.log(`[CircuitBreaker:${serviceName}] CIRCUIT CLOSED - recovered successfully`);
     }
   } else if (cb.state === 'CLOSED') {
-    // In CLOSED state, successful requests reduce failure impact
-    // Don't reset completely - let the window naturally expire
-    // This prevents a single success from masking ongoing issues
   }
   
   await cb.save();
   return cb;
 }
 
-/**
- * Determine if a request should be allowed through
- * This is the main entry point called by the middleware
- * 
- * @param {string} serviceName - Service identifier
- * @returns {Object} { allowed: boolean, state: string, reason?: string }
- */
 async function allowRequest(serviceName = 'default') {
   const cb = await getBreaker(serviceName);
   
-  // CLOSED: Always allow
   if (cb.state === 'CLOSED') {
     return { allowed: true, state: 'CLOSED' };
   }
   
-  // OPEN: Check if timeout has elapsed
   if (cb.state === 'OPEN') {
     const openedAt = cb.openedAt ? cb.openedAt.getTime() : (cb.lastFailureTime ? cb.lastFailureTime.getTime() : 0);
     const elapsed = Date.now() - openedAt;
     
     if (elapsed >= cb.timeout) {
-      // Transition to HALF_OPEN
       cb.state = 'HALF_OPEN';
       cb.successCount = 0;
       resetHalfOpenState(serviceName);
@@ -219,13 +145,11 @@ async function allowRequest(serviceName = 'default') {
       
       console.log(`[CircuitBreaker:${serviceName}] Timeout elapsed, transitioning to HALF_OPEN`);
       
-      // Allow this first request
       const hoState = getHalfOpenState(serviceName);
       hoState.requestCount = 1;
       return { allowed: true, state: 'HALF_OPEN' };
     }
     
-    // Still within timeout, reject
     const remaining = Math.ceil((cb.timeout - elapsed) / 1000);
     return { 
       allowed: false, 
@@ -235,7 +159,6 @@ async function allowRequest(serviceName = 'default') {
     };
   }
   
-  // HALF_OPEN: Allow limited requests
   if (cb.state === 'HALF_OPEN') {
     const hoState = getHalfOpenState(serviceName);
     
@@ -245,7 +168,6 @@ async function allowRequest(serviceName = 'default') {
       return { allowed: true, state: 'HALF_OPEN' };
     }
     
-    // Too many concurrent HALF_OPEN requests, reject
     return { 
       allowed: false, 
       state: 'HALF_OPEN',
@@ -253,18 +175,9 @@ async function allowRequest(serviceName = 'default') {
     };
   }
   
-  // Fallback - shouldn't reach here
   return { allowed: true, state: cb.state };
 }
 
-/**
- * Perform a health check against the downstream service
- * Used during HALF_OPEN state to proactively test recovery
- * 
- * @param {string} serviceName - Service identifier
- * @param {Function} healthCheckFn - Async function that tests the downstream service
- * @returns {Object} Health check result
- */
 async function performHealthCheck(serviceName = 'default', healthCheckFn) {
   const cb = await getBreaker(serviceName);
   
@@ -275,7 +188,6 @@ async function performHealthCheck(serviceName = 'default', healthCheckFn) {
     
     console.log(`[CircuitBreaker:${serviceName}] Health check PASSED (${responseTime}ms)`);
     
-    // If we're in HALF_OPEN, record this as a success
     if (cb.state === 'HALF_OPEN') {
       await recordSuccess(serviceName);
     }
@@ -288,7 +200,6 @@ async function performHealthCheck(serviceName = 'default', healthCheckFn) {
   } catch (error) {
     console.log(`[CircuitBreaker:${serviceName}] Health check FAILED: ${error.message}`);
     
-    // If we're in HALF_OPEN, record this as a failure
     if (cb.state === 'HALF_OPEN') {
       await recordFailure({ 
         serviceName, 
@@ -305,13 +216,6 @@ async function performHealthCheck(serviceName = 'default', healthCheckFn) {
   }
 }
 
-/**
- * Get comprehensive status for the dashboard
- * 
- * @param {string} serviceName - Service identifier
- * @param {number} failureLimit - Max failures to return
- * @returns {Object} Complete status object
- */
 async function getStatus(serviceName = 'default', failureLimit = 50) {
   const cb = await getBreaker(serviceName);
   const failures = await Failure.getRecent(serviceName, failureLimit);
@@ -332,12 +236,6 @@ async function getStatus(serviceName = 'default', failureLimit = 50) {
   };
 }
 
-/**
- * Manually reset the circuit breaker
- * Used by admin endpoints and Unix signal handlers
- * 
- * @param {string} serviceName - Service identifier
- */
 async function resetBreaker(serviceName = 'default') {
   const cb = await getBreaker(serviceName);
   
@@ -359,7 +257,6 @@ async function resetBreaker(serviceName = 'default') {
   
   await cb.save();
   
-  // Clear failure history for this service so dashboard shows clean state
   try {
     await Failure.deleteMany({ serviceName });
     console.log(`[CircuitBreaker:${serviceName}] Failure history cleared`);
@@ -372,15 +269,7 @@ async function resetBreaker(serviceName = 'default') {
   return cb;
 }
 
-/**
- * Update the failure threshold
- * Used by shell scripts for SLA-based tuning
- * 
- * @param {string} serviceName - Service identifier
- * @param {number} threshold - New failure count threshold
- */
 async function updateThreshold(serviceName = 'default', threshold) {
-  // Handle legacy call signature: updateThreshold(threshold)
   if (typeof serviceName === 'number') {
     threshold = serviceName;
     serviceName = 'default';
@@ -396,12 +285,6 @@ async function updateThreshold(serviceName = 'default', threshold) {
   return cb;
 }
 
-/**
- * Update the failure rate threshold
- * 
- * @param {string} serviceName - Service identifier
- * @param {number} rate - New failure rate threshold (0-100)
- */
 async function updateFailureRateThreshold(serviceName = 'default', rate) {
   const cb = await getBreaker(serviceName);
   cb.failureRateThreshold = Math.min(100, Math.max(0, rate));
@@ -413,12 +296,6 @@ async function updateFailureRateThreshold(serviceName = 'default', rate) {
   return cb;
 }
 
-/**
- * Update the timeout duration
- * 
- * @param {string} serviceName - Service identifier
- * @param {number} timeout - New timeout in milliseconds
- */
 async function updateTimeout(serviceName = 'default', timeout) {
   const cb = await getBreaker(serviceName);
   cb.timeout = timeout;
@@ -430,12 +307,6 @@ async function updateTimeout(serviceName = 'default', timeout) {
   return cb;
 }
 
-/**
- * Update multiple configuration values at once
- * 
- * @param {string} serviceName - Service identifier
- * @param {Object} config - Configuration values to update
- */
 async function updateConfig(serviceName = 'default', config = {}) {
   const cb = await getBreaker(serviceName);
   

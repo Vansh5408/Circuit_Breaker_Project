@@ -1,17 +1,4 @@
-/**
- * Circuit Breaker Dashboard - Frontend JavaScript
- * 
- * Features:
- * - Real-time status updates with auto-refresh
- * - Visual state indicators
- * - Configuration management
- * - Payment testing with flood simulation
- * - Activity logging
- */
 
-// =============================================================================
-// API Client
-// =============================================================================
 const API = (() => {
   const base = 'http://localhost:3000';
 
@@ -34,7 +21,6 @@ const API = (() => {
         data = text;
       }
       
-      // Check if response was successful (status code in 200-299 range)
       if (!response.ok) {
         const error = new Error(data.error || data.message || `HTTP ${response.status}`);
         error.status = response.status;
@@ -44,11 +30,9 @@ const API = (() => {
       
       return data;
     } catch (error) {
-      // Re-throw if already an HTTP error
       if (error.status) {
         throw error;
       }
-      // Network or other errors
       throw new Error(`API Error: ${error.message}`);
     }
   }
@@ -83,15 +67,9 @@ const API = (() => {
   };
 })();
 
-// =============================================================================
-// DOM Utilities
-// =============================================================================
 const $ = (id) => document.getElementById(id);
 const $$ = (selector) => document.querySelectorAll(selector);
 
-// =============================================================================
-// Logging
-// =============================================================================
 const maxLogEntries = 100;
 
 function log(message, type = 'info') {
@@ -104,7 +82,6 @@ function log(message, type = 'info') {
   
   logs.prepend(entry);
   
-  // Limit log entries
   while (logs.children.length > maxLogEntries) {
     logs.removeChild(logs.lastChild);
   }
@@ -116,9 +93,6 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// =============================================================================
-// State Management
-// =============================================================================
 let autoRefreshInterval = null;
 let lastState = null;
 let isEditingConfig = false;
@@ -127,17 +101,14 @@ function updateUI(data) {
   const breaker = data.breaker;
   const state = breaker.state;
   
-  // Update state indicator
   const indicator = $('state-indicator');
   indicator.className = `state-indicator state-${state.toLowerCase()}`;
   $('state-value').textContent = state;
   $('state-reason').textContent = breaker.lastTripReason || '';
   
-  // Detect state change
   if (lastState && lastState !== state) {
     log(`State changed: ${lastState} → ${state}`, state === 'OPEN' ? 'error' : 'success');
     
-    // Play notification sound or visual alert
     if (state === 'OPEN') {
       document.title = '🔴 OPEN - Circuit Breaker';
     } else if (state === 'CLOSED') {
@@ -148,12 +119,10 @@ function updateUI(data) {
   }
   lastState = state;
   
-  // Update metadata
   $('server-time').textContent = new Date(data.serverTime).toLocaleTimeString();
   $('last-updated').textContent = new Date().toLocaleTimeString();
   $('total-trips').textContent = breaker.totalTrips || 0;
   
-  // Update metrics
   $('failure-count').textContent = breaker.failureCount || 0;
   $('threshold').textContent = breaker.threshold || 5;
   $('failure-rate').textContent = breaker.failureRate || '0%';
@@ -161,7 +130,6 @@ function updateUI(data) {
   $('total-requests').textContent = breaker.totalRequests || 0;
   $('failed-requests').textContent = breaker.failedRequests || 0;
   
-  // Update HALF_OPEN section
   const hoSection = $('halfopen-section');
   if (state === 'HALF_OPEN' && data.halfOpenState) {
     hoSection.classList.remove('hidden');
@@ -173,17 +141,14 @@ function updateUI(data) {
     hoSection.classList.add('hidden');
   }
   
-  // Update configuration inputs (skip if user is currently editing)
   if (!isEditingConfig) {
     $('thresholdInput').value = breaker.threshold || 5;
     $('rateThresholdInput').value = parseInt(breaker.failureRateThreshold) || 50;
     $('timeoutInput').value = breaker.timeout || 30000;
   }
   
-  // Update failures list
   updateFailuresList(data.failures || []);
   
-  // Update failure stats
   if (data.failureStats) {
     $('failure-stats').textContent = `(${data.failureStats.totalFailures} in last hour)`;
   }
@@ -210,9 +175,6 @@ function updateFailuresList(failures) {
   `).join('');
 }
 
-// =============================================================================
-// Status Refresh
-// =============================================================================
 async function refreshStatus() {
   try {
     const data = await API.status();
@@ -236,17 +198,12 @@ function stopAutoRefresh() {
   }
 }
 
-// =============================================================================
-// Event Handlers
-// =============================================================================
 
-// Refresh button
 $('refresh').addEventListener('click', async () => {
   log('Refreshing status...', 'info');
   await refreshStatus();
 });
 
-// Reset button
 $('reset').addEventListener('click', async () => {
   try {
     await API.reset();
@@ -257,7 +214,6 @@ $('reset').addEventListener('click', async () => {
   }
 });
 
-// Health check button
 $('health-check').addEventListener('click', async () => {
   try {
     const result = await API.healthCheck();
@@ -268,7 +224,6 @@ $('health-check').addEventListener('click', async () => {
   }
 });
 
-// Auto-refresh toggle
 $('auto-refresh').addEventListener('change', (e) => {
   if (e.target.checked) {
     startAutoRefresh();
@@ -277,7 +232,6 @@ $('auto-refresh').addEventListener('change', (e) => {
   }
 });
 
-// Set threshold
 $('setThreshold').addEventListener('click', async () => {
   const value = parseInt($('thresholdInput').value);
   if (isNaN(value) || value < 1) {
@@ -293,7 +247,6 @@ $('setThreshold').addEventListener('click', async () => {
   }
 });
 
-// Set rate threshold
 $('setRateThreshold').addEventListener('click', async () => {
   const value = parseInt($('rateThresholdInput').value);
   if (isNaN(value) || value < 1 || value > 100) {
@@ -309,7 +262,6 @@ $('setRateThreshold').addEventListener('click', async () => {
   }
 });
 
-// Set timeout
 $('setTimeout').addEventListener('click', async () => {
   const value = parseInt($('timeoutInput').value);
   if (isNaN(value) || value < 1000) {
@@ -325,7 +277,6 @@ $('setTimeout').addEventListener('click', async () => {
   }
 });
 
-// Set simulation
 $('setSimulation').addEventListener('click', async () => {
   const failRate = parseFloat($('failRateInput').value);
   if (isNaN(failRate) || failRate < 0 || failRate > 1) {
@@ -340,7 +291,6 @@ $('setSimulation').addEventListener('click', async () => {
   }
 });
 
-// Single payment
 $('singlePay').addEventListener('click', async () => {
   try {
     const result = await API.pay();
@@ -358,7 +308,6 @@ $('singlePay').addEventListener('click', async () => {
   }
 });
 
-// Flood test
 let flooding = false;
 let floodHandles = [];
 
@@ -405,41 +354,31 @@ function stopFlood() {
   refreshStatus();
 }
 
-// Load simulation settings on startup
 async function loadSimulationSettings() {
   try {
     const config = await API.getSimulation();
     $('failRateInput').value = config.failRate || 0.3;
   } catch (error) {
-    // Ignore - simulation endpoint might not be available
   }
 }
 
-// =============================================================================
-// Initialization
-// =============================================================================
 document.addEventListener('DOMContentLoaded', () => {
   log('Dashboard initialized', 'info');
   
-  // Track config input focus to prevent auto-refresh from overwriting user input
   ['thresholdInput', 'rateThresholdInput', 'timeoutInput', 'failRateInput'].forEach(id => {
     $(id).addEventListener('focus', () => { isEditingConfig = true; });
     $(id).addEventListener('blur', () => { isEditingConfig = false; });
   });
   
-  // Initial status fetch
   refreshStatus();
   
-  // Load simulation settings
   loadSimulationSettings();
   
-  // Start auto-refresh if checkbox is checked
   if ($('auto-refresh').checked) {
     startAutoRefresh();
   }
 });
 
-// Clean up on page unload
 window.addEventListener('beforeunload', () => {
   stopAutoRefresh();
   stopFlood();

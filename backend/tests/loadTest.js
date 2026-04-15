@@ -1,22 +1,6 @@
-/**
- * Load Testing Script for Circuit Breaker
- * 
- * This script simulates high-concurrency traffic to test:
- * 1. Circuit breaker behavior under load
- * 2. State transition timing
- * 3. Request latency distribution
- * 4. Recovery behavior
- * 
- * Usage:
- *   node tests/loadTest.js                    # Default settings
- *   node tests/loadTest.js --rps 100          # 100 requests per second
- *   node tests/loadTest.js --duration 60      # Run for 60 seconds
- *   node tests/loadTest.js --url http://prod:3000  # Custom URL
- */
 
 const http = require('http');
 
-// Configuration
 const config = {
   url: process.env.TARGET_URL || 'http://localhost:3000/payment',
   requestsPerSecond: parseInt(process.env.RPS) || 50,
@@ -24,7 +8,6 @@ const config = {
   concurrency: parseInt(process.env.CONCURRENCY) || 10
 };
 
-// Parse command line arguments
 process.argv.slice(2).forEach((arg, i, args) => {
   if (arg === '--url') config.url = args[i + 1];
   if (arg === '--rps') config.requestsPerSecond = parseInt(args[i + 1]);
@@ -32,7 +15,6 @@ process.argv.slice(2).forEach((arg, i, args) => {
   if (arg === '--concurrency') config.concurrency = parseInt(args[i + 1]);
 });
 
-// Metrics
 const metrics = {
   totalRequests: 0,
   successfulRequests: 0,
@@ -44,9 +26,6 @@ const metrics = {
   endTime: null
 };
 
-/**
- * Make a single HTTP request
- */
 function makeRequest() {
   return new Promise((resolve) => {
     const startTime = Date.now();
@@ -70,7 +49,6 @@ function makeRequest() {
         metrics.totalRequests++;
         metrics.latencies.push(latency);
         
-        // Track status codes
         const code = res.statusCode.toString();
         metrics.statusCodes[code] = (metrics.statusCodes[code] || 0) + 1;
         
@@ -106,9 +84,6 @@ function makeRequest() {
   });
 }
 
-/**
- * Calculate percentile from sorted array
- */
 function percentile(arr, p) {
   if (arr.length === 0) return 0;
   const sorted = [...arr].sort((a, b) => a - b);
@@ -116,9 +91,6 @@ function percentile(arr, p) {
   return sorted[Math.max(0, idx)];
 }
 
-/**
- * Print real-time progress
- */
 function printProgress() {
   const elapsed = (Date.now() - metrics.startTime) / 1000;
   const rps = metrics.totalRequests / elapsed;
@@ -136,9 +108,6 @@ function printProgress() {
     `Circuit Open: ${circuitOpenRate}%`);
 }
 
-/**
- * Print final report
- */
 function printReport() {
   const duration = (metrics.endTime - metrics.startTime) / 1000;
   const avgLatency = metrics.latencies.length > 0
@@ -172,9 +141,6 @@ function printReport() {
   console.log('╚══════════════════════════════════════════════════════════════╝');
 }
 
-/**
- * Run the load test
- */
 async function runLoadTest() {
   console.log('╔══════════════════════════════════════════════════════════════╗');
   console.log('║             Circuit Breaker Load Test                        ║');
@@ -189,16 +155,12 @@ async function runLoadTest() {
   metrics.startTime = Date.now();
   const endTime = metrics.startTime + config.durationSeconds * 1000;
   
-  // Progress update interval
   const progressInterval = setInterval(printProgress, 1000);
   
-  // Calculate delay between request batches
   const batchSize = config.concurrency;
   const batchDelay = (batchSize / config.requestsPerSecond) * 1000;
   
-  // Main loop
   while (Date.now() < endTime) {
-    // Send batch of concurrent requests
     const batch = [];
     for (let i = 0; i < batchSize; i++) {
       batch.push(makeRequest());
@@ -206,7 +168,6 @@ async function runLoadTest() {
     
     await Promise.all(batch);
     
-    // Wait before next batch
     await new Promise(resolve => setTimeout(resolve, batchDelay));
   }
   
@@ -216,5 +177,4 @@ async function runLoadTest() {
   printReport();
 }
 
-// Run the test
 runLoadTest().catch(console.error);

@@ -1,76 +1,49 @@
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
-/**
- * CircuitBreaker Schema - Stores the current state of the circuit breaker
- * 
- * States:
- * - CLOSED: Normal operation, requests flow through
- * - OPEN: Circuit is tripped, requests are rejected immediately
- * - HALF_OPEN: Testing phase, limited requests allowed to test recovery
- * 
- * Why persist to MongoDB?
- * 1. Survives server restarts - state is recovered automatically
- * 2. Enables multi-instance deployments - all servers share same state
- * 3. Provides audit trail for debugging and analytics
- * 4. Allows external tools to query/modify breaker state
- */
 const CircuitSchema = new Schema({
-  // Service identifier - allows multiple circuit breakers per app
   serviceName: { 
     type: String, 
     default: 'default',
-    index: true  // Index for fast lookups by service
+    index: true
   },
   
-  // Current state of the circuit breaker
   state: { 
     type: String, 
     enum: ['CLOSED', 'OPEN', 'HALF_OPEN'], 
     default: 'CLOSED',
-    index: true  // Index for querying breakers by state
+    index: true
   },
   
-  // Failure tracking
   failureCount: { type: Number, default: 0 },
-  totalRequests: { type: Number, default: 0 },      // Total requests in current window
-  failedRequests: { type: Number, default: 0 },     // Failed requests in current window
-  successCount: { type: Number, default: 0 },       // Consecutive successes in HALF_OPEN
+  totalRequests: { type: Number, default: 0 },
+  failedRequests: { type: Number, default: 0 },
+  successCount: { type: Number, default: 0 },
   
-  // Timing
   lastFailureTime: { type: Date, default: null },
   lastSuccessTime: { type: Date, default: null },
-  windowStartTime: { type: Date, default: Date.now }, // Start of current measurement window
-  openedAt: { type: Date, default: null },           // When circuit was opened
+  windowStartTime: { type: Date, default: Date.now },
+  openedAt: { type: Date, default: null },
   
-  // Configuration
-  threshold: { type: Number, default: 5 },           // Failure count threshold
-  failureRateThreshold: { type: Number, default: 50 }, // Failure rate % threshold
-  timeout: { type: Number, default: 30000 },         // Time to wait before HALF_OPEN (ms)
-  windowSize: { type: Number, default: 60000 },      // Time window for rate calculation (ms)
-  halfOpenMaxRequests: { type: Number, default: 3 }, // Max test requests in HALF_OPEN
-  successThreshold: { type: Number, default: 3 },    // Successes needed to close circuit
+  threshold: { type: Number, default: 5 },
+  failureRateThreshold: { type: Number, default: 50 },
+  timeout: { type: Number, default: 30000 },
+  windowSize: { type: Number, default: 60000 },
+  halfOpenMaxRequests: { type: Number, default: 3 },
+  successThreshold: { type: Number, default: 3 },
   
-  // Metrics for dashboard/analytics
-  totalTrips: { type: Number, default: 0 },          // How many times circuit has opened
-  lastTripReason: { type: String, default: null },   // Why circuit was last opened
+  totalTrips: { type: Number, default: 0 },
+  lastTripReason: { type: String, default: null },
   
-  // Version for optimistic concurrency control
   version: { type: Number, default: 0 }
 }, { 
-  timestamps: true,  // Adds createdAt, updatedAt automatically
-  collection: 'circuit_breakers'  // Explicit collection name
+  timestamps: true,
+  collection: 'circuit_breakers'
 });
 
-// Compound index for multi-service deployments
 CircuitSchema.index({ serviceName: 1, state: 1 });
-// Index for finding stale open circuits
 CircuitSchema.index({ state: 1, openedAt: 1 });
 
-/**
- * Get or create a circuit breaker instance for a service
- * Uses upsert for thread-safe creation
- */
 CircuitSchema.statics.getInstance = async function (serviceName = 'default') {
   let doc = await this.findOneAndUpdate(
     { serviceName },
@@ -80,35 +53,23 @@ CircuitSchema.statics.getInstance = async function (serviceName = 'default') {
   return doc;
 };
 
-/**
- * Calculate current failure rate as a percentage
- */
 CircuitSchema.methods.getFailureRate = function() {
   if (this.totalRequests === 0) return 0;
   return (this.failedRequests / this.totalRequests) * 100;
 };
 
-/**
- * Check if the measurement window has expired and needs reset
- */
 CircuitSchema.methods.isWindowExpired = function() {
   const now = Date.now();
   const windowStart = this.windowStartTime ? this.windowStartTime.getTime() : 0;
   return (now - windowStart) >= this.windowSize;
 };
 
-/**
- * Reset the measurement window counters
- */
 CircuitSchema.methods.resetWindow = function() {
   this.totalRequests = 0;
   this.failedRequests = 0;
   this.windowStartTime = new Date();
 };
 
-/**
- * Get a summary object for API responses
- */
 CircuitSchema.methods.toStatusObject = function() {
   return {
     serviceName: this.serviceName,

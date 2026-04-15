@@ -18,11 +18,9 @@ module.exports = async function connectDB() {
       return;
     } catch (err) {
       console.error('MongoDB connection error using MONGO_URI:', err.message);
-      // fallthrough to try local / memory
     }
   }
 
-  // try local MongoDB first
   try {
     await connect(defaultUri);
     return;
@@ -30,7 +28,6 @@ module.exports = async function connectDB() {
     console.error('Local MongoDB connection error:', err.message);
   }
 
-  // fallback to in-memory MongoDB for development/demo
   try {
     console.log('Starting in-memory MongoDB as a fallback for development...');
     _mongod = await MongoMemoryServer.create();

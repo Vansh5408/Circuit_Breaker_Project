@@ -1,21 +1,3 @@
-/**
- * Circuit Breaker Pattern - Main Application Entry Point
- * 
- * This is a production-grade implementation of the Circuit Breaker pattern
- * using Node.js, Express, and MongoDB.
- * 
- * Architecture Overview:
- * ┌─────────────┐    ┌─────────────────┐    ┌─────────────────┐
- * │   Client    │───▶│ Circuit Breaker │───▶│  Downstream     │
- * │  (Frontend) │    │   Middleware    │    │    Service      │
- * └─────────────┘    └─────────────────┘    └─────────────────┘
- *                           │
- *                           ▼
- *                    ┌─────────────────┐
- *                    │    MongoDB      │
- *                    │  (State Store)  │
- *                    └─────────────────┘
- */
 
 require('dotenv').config();
 const express = require('express');
@@ -24,16 +6,11 @@ const breakerLogic = require('./utils/breakerLogic');
 const circuitBreakerMiddleware = require('./middleware/circuitBreaker');
 const paymentService = require('./services/paymentService');
 
-// Initialize database connection
 connectDB();
 
 const app = express();
 app.use(express.json());
 
-// ============================================================================
-// CORS Configuration
-// In production, restrict this to your actual frontend domain
-// ============================================================================
 app.use((req, res, next) => {
   const allowedOrigins = process.env.ALLOWED_ORIGINS 
     ? process.env.ALLOWED_ORIGINS.split(',') 
@@ -54,25 +31,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// Prevent browsers from caching API responses (ensures fresh data on every fetch)
 app.use((req, res, next) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.set('Pragma', 'no-cache');
   next();
 });
 
-// ============================================================================
-// Health Check Endpoints (excluded from circuit breaker)
-// These endpoints are used for:
-// 1. Load balancer health checks
-// 2. Kubernetes liveness/readiness probes
-// 3. Circuit breaker HALF_OPEN state recovery testing
-// ============================================================================
 
-/**
- * Basic health check - always returns 200 if server is running
- * Used by load balancers and container orchestrators
- */
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy',
@@ -81,10 +46,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-/**
- * Detailed health check - includes dependency status
- * Used for comprehensive health monitoring
- */
 app.get('/health/detailed', async (req, res) => {
   try {
     const status = await breakerLogic.getStatus();
@@ -114,11 +75,6 @@ app.get('/health/detailed', async (req, res) => {
   }
 });
 
-/**
- * Downstream service health check
- * Used during HALF_OPEN state to test if the downstream service has recovered
- * This prevents sending real traffic to a potentially still-failing service
- */
 app.get('/health/downstream', async (req, res) => {
   try {
     const healthy = await paymentService.healthCheck();
@@ -136,32 +92,18 @@ app.get('/health/downstream', async (req, res) => {
   }
 });
 
-// ============================================================================
-// Circuit Breaker Middleware
-// Protects all routes below this point
-// Admin routes are excluded to allow monitoring even when circuit is open
-// ============================================================================
 app.use(circuitBreakerMiddleware({
   serviceName: paymentService.SERVICE_NAME,
   excludePaths: ['/admin', '/health', '/metrics'],
   onOpen: ({ serviceName, reason }) => {
     console.log(`[ALERT] Circuit breaker OPENED for ${serviceName}: ${reason}`);
-    // In production, send alerts to monitoring systems (PagerDuty, Slack, etc.)
   },
   onClose: ({ serviceName }) => {
     console.log(`[INFO] Circuit breaker CLOSED for ${serviceName} - service recovered`);
   }
 }));
 
-// ============================================================================
-// Protected Business Endpoints
-// These routes are protected by the circuit breaker middleware
-// ============================================================================
 
-/**
- * Payment endpoint - simulates processing a payment
- * Protected by circuit breaker to prevent cascading failures
- */
 app.post('/payment', async (req, res) => {
   try {
     const result = await paymentService.processPayment(req.body);
@@ -176,16 +118,7 @@ app.post('/payment', async (req, res) => {
   }
 });
 
-// ============================================================================
-// Admin/Dashboard Endpoints
-// These are NOT protected by circuit breaker (excluded paths)
-// Used for monitoring, configuration, and manual intervention
-// ============================================================================
 
-/**
- * Get current circuit breaker status
- * Includes state, counters, failure history, and statistics
- */
 app.get('/admin/status', async (req, res) => {
   try {
     const serviceName = req.query.service || paymentService.SERVICE_NAME;
@@ -197,10 +130,6 @@ app.get('/admin/status', async (req, res) => {
   }
 });
 
-/**
- * Update circuit breaker threshold (failure count)
- * Used by shell scripts for SLA-based tuning
- */
 app.post('/admin/threshold', async (req, res) => {
   try {
     const { threshold, service = paymentService.SERVICE_NAME } = req.body;
@@ -220,10 +149,6 @@ app.post('/admin/threshold', async (req, res) => {
   }
 });
 
-/**
- * Update circuit breaker configuration
- * Allows updating multiple settings at once
- */
 app.post('/admin/config', async (req, res) => {
   try {
     const { service = paymentService.SERVICE_NAME, ...config } = req.body;
@@ -238,11 +163,6 @@ app.post('/admin/config', async (req, res) => {
   }
 });
 
-/**
- * Manual circuit breaker reset
- * Forces the circuit back to CLOSED state
- * Use with caution - only when you're sure the downstream service is healthy
- */
 app.post('/admin/reset', async (req, res) => {
   try {
     const serviceName = req.body.service || paymentService.SERVICE_NAME;
@@ -256,9 +176,6 @@ app.post('/admin/reset', async (req, res) => {
   }
 });
 
-/**
- * Trigger a health check and optionally advance HALF_OPEN recovery
- */
 app.post('/admin/health-check', async (req, res) => {
   try {
     const serviceName = req.body.service || paymentService.SERVICE_NAME;
@@ -272,10 +189,6 @@ app.post('/admin/health-check', async (req, res) => {
   }
 });
 
-/**
- * Get/update payment service simulation configuration
- * Useful for testing different failure scenarios
- */
 app.get('/admin/simulation', (req, res) => {
   res.json(paymentService.getConfig());
 });
@@ -285,14 +198,10 @@ app.post('/admin/simulation', (req, res) => {
   res.json({ ok: true, config });
 });
 
-// ============================================================================
-// Metrics Endpoint (for Prometheus/Grafana integration)
-// ============================================================================
 app.get('/metrics', async (req, res) => {
   try {
     const status = await breakerLogic.getStatus();
     
-    // Format metrics in Prometheus exposition format
     const metrics = [
       `# HELP circuit_breaker_state Current state of the circuit breaker (0=CLOSED, 1=OPEN, 2=HALF_OPEN)`,
       `# TYPE circuit_breaker_state gauge`,
@@ -318,9 +227,6 @@ app.get('/metrics', async (req, res) => {
   }
 });
 
-// ============================================================================
-// Error Handling Middleware
-// ============================================================================
 app.use((err, req, res, next) => {
   console.error('[ERROR]', err.stack);
   res.status(500).json({ 
@@ -329,25 +235,11 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint not found' });
 });
 
-// ============================================================================
-// Unix Signal Handlers
-// These allow operational control without restarting the server
-// ============================================================================
 
-/**
- * SIGUSR1: Reset circuit breaker manually
- * Usage: kill -SIGUSR1 <pid>
- * 
- * Useful for:
- * - Emergency recovery when you've fixed the downstream issue
- * - Testing circuit breaker behavior
- * - Automation scripts
- */
 process.on('SIGUSR1', async () => {
   console.log('[SIGNAL] SIGUSR1 received — resetting circuit breaker');
   try {
@@ -358,12 +250,6 @@ process.on('SIGUSR1', async () => {
   }
 });
 
-/**
- * SIGUSR2: Log current circuit breaker status
- * Usage: kill -SIGUSR2 <pid>
- * 
- * Useful for debugging without accessing the API
- */
 process.on('SIGUSR2', async () => {
   console.log('[SIGNAL] SIGUSR2 received — logging circuit breaker status');
   try {
@@ -374,10 +260,6 @@ process.on('SIGUSR2', async () => {
   }
 });
 
-/**
- * Graceful shutdown on SIGTERM/SIGINT
- * Ensures clean disconnection from MongoDB
- */
 async function gracefulShutdown(signal) {
   console.log(`[SIGNAL] ${signal} received — starting graceful shutdown`);
   
@@ -395,9 +277,6 @@ async function gracefulShutdown(signal) {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// ============================================================================
-// Server Startup
-// ============================================================================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {

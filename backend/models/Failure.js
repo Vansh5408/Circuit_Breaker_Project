@@ -1,66 +1,45 @@
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
-/**
- * Failure Schema - Stores detailed failure history for analytics and debugging
- * 
- * Why store failure history?
- * 1. Post-mortem analysis - understand what went wrong and when
- * 2. Pattern detection - identify recurring failure patterns
- * 3. SLA compliance reporting - track failure rates over time
- * 4. Alerting integration - trigger alerts based on failure patterns
- * 5. Recovery validation - verify that fixes actually resolved issues
- */
 const FailureSchema = new Schema({
-  // Which service/breaker this failure belongs to
   serviceName: { 
     type: String, 
     default: 'default',
-    index: true  // Index for filtering by service
+    index: true
   },
   
-  // Error details
   message: { type: String, required: true },
-  errorCode: { type: String, default: null },        // HTTP status or error code
-  errorType: { type: String, default: 'UNKNOWN' },   // TIMEOUT, CONNECTION, HTTP_ERROR, etc.
+  errorCode: { type: String, default: null },
+  errorType: { type: String, default: 'UNKNOWN' },
   
-  // Request context (sanitized - no sensitive data!)
-  endpoint: { type: String, default: null },         // Which endpoint failed
-  method: { type: String, default: null },           // HTTP method
+  endpoint: { type: String, default: null },
+  method: { type: String, default: null },
   
-  // Timing information
   timestamp: { type: Date, default: Date.now, index: true },
-  responseTime: { type: Number, default: null },     // How long before failure (ms)
+  responseTime: { type: Number, default: null },
   
-  // Circuit state at time of failure
   circuitState: { 
     type: String, 
     enum: ['CLOSED', 'OPEN', 'HALF_OPEN'], 
     default: 'CLOSED' 
   },
   
-  // Additional metadata
-  metadata: { type: Schema.Types.Mixed, default: {} }, // Flexible field for extra context
+  metadata: { type: Schema.Types.Mixed, default: {} },
   
-  // For TTL - auto-delete old failure records
   expiresAt: { 
     type: Date, 
-    default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-    index: { expireAfterSeconds: 0 }  // MongoDB TTL index
+    default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    index: { expireAfterSeconds: 0 }
   }
 }, { 
-  timestamps: false,  // We use our own timestamp field
+  timestamps: false,
   collection: 'failures'
 });
 
-// Compound indexes for common queries
-FailureSchema.index({ serviceName: 1, timestamp: -1 });  // Recent failures by service
-FailureSchema.index({ errorType: 1, timestamp: -1 });    // Failures by type
-FailureSchema.index({ serviceName: 1, errorType: 1 });   // Service + type combo
+FailureSchema.index({ serviceName: 1, timestamp: -1 });
+FailureSchema.index({ errorType: 1, timestamp: -1 });
+FailureSchema.index({ serviceName: 1, errorType: 1 });
 
-/**
- * Create a failure record with proper defaults
- */
 FailureSchema.statics.logFailure = async function(data) {
   const failure = new this({
     serviceName: data.serviceName || 'default',
@@ -76,9 +55,6 @@ FailureSchema.statics.logFailure = async function(data) {
   return failure.save();
 };
 
-/**
- * Get failure statistics for a time window
- */
 FailureSchema.statics.getStats = async function(serviceName = 'default', windowMs = 3600000) {
   const since = new Date(Date.now() - windowMs);
   
@@ -110,9 +86,6 @@ FailureSchema.statics.getStats = async function(serviceName = 'default', windowM
   };
 };
 
-/**
- * Get recent failures for dashboard display
- */
 FailureSchema.statics.getRecent = async function(serviceName = 'default', limit = 50) {
   return this.find({ serviceName })
     .sort({ timestamp: -1 })
