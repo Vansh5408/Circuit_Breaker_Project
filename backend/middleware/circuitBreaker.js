@@ -1,3 +1,4 @@
+// Circuit breaker
 const breakerLogic = require('../utils/breakerLogic');
 
 function circuitBreakerMiddleware(options = {}) {
